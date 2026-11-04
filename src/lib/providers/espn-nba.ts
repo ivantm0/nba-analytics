@@ -52,19 +52,33 @@ function parseStats(keys: string[], values: string[], starter: boolean): NbaStat
 export const espnNbaProvider: StatsProvider = {
   sport: "nba",
 
-  async getCompletedGames(date) {
+  async getSchedule(date) {
     const board = await getJson(`${BASE}/scoreboard?dates=${date.replaceAll("-", "")}`);
     const season: number = board.leagues?.[0]?.season?.year;
-    const finished = (board.events ?? []).filter((e: any) => e.status?.type?.completed);
-
-    // Los box scores de cada partido se piden en paralelo
-    return Promise.all(finished.map(async (event: any): Promise<ProviderGame> => {
+    return (board.events ?? []).map((event: any) => {
       const comp = event.competitions[0];
       const side = (h: string) => comp.competitors.find((c: any) => c.homeAway === h);
-      const home = side("home");
-      const away = side("away");
+      const state = event.status?.type?.state;
+      const started = state !== "pre";
+      const team = (c: any) => ({ ...toTeam(c.team), score: started ? num(c.score) : null });
+      return {
+        externalId: String(event.id),
+        season,
+        startTime: event.date,
+        status: event.status?.type?.completed ? "final" : started ? "live" : "scheduled",
+        statusDetail: event.status?.type?.shortDetail ?? "",
+        home: team(side("home")),
+        away: team(side("away")),
+      };
+    });
+  },
 
-      const summary = await getJson(`${BASE}/summary?event=${event.id}`);
+  async getCompletedGames(date) {
+    const finished = (await this.getSchedule(date)).filter((g) => g.status === "final");
+
+    // Los box scores de cada partido se piden en paralelo
+    return Promise.all(finished.map(async (game): Promise<ProviderGame> => {
+      const summary = await getJson(`${BASE}/summary?event=${game.externalId}`);
       const lines: ProviderPlayerLine[] = [];
       for (const teamBox of summary.boxscore?.players ?? []) {
         const block = teamBox.statistics?.[0];
@@ -86,11 +100,11 @@ export const espnNbaProvider: StatsProvider = {
       }
 
       return {
-        externalId: String(event.id),
+        externalId: game.externalId,
         date,
-        season,
-        home: { ...toTeam(home.team), score: num(home.score) },
-        away: { ...toTeam(away.team), score: num(away.score) },
+        season: game.season,
+        home: game.home,
+        away: game.away,
         lines,
       };
     }));

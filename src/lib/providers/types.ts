@@ -29,8 +29,20 @@ export interface ProviderGame {
   lines: ProviderPlayerLine[];
 }
 
+export interface ScheduledGame {
+  externalId: string;
+  season: number;
+  startTime: string; // ISO UTC
+  status: "scheduled" | "live" | "final";
+  statusDetail: string; // ej. "Q3 5:12", "Final"
+  home: ProviderTeam & { score: number | null };
+  away: ProviderTeam & { score: number | null };
+}
+
 export interface StatsProvider {
   sport: string;
+  /** Todos los partidos de una fecha (jugados, en juego o por jugar), sin estadísticas */
+  getSchedule(date: string): Promise<ScheduledGame[]>;
   /** Partidos finalizados de una fecha, con las líneas de estadísticas de cada jugador */
   getCompletedGames(date: string): Promise<ProviderGame[]>;
 }

@@ -112,9 +112,4 @@ export async function ingestDate(provider: StatsProvider, date: string) {
   });
 }
 
-/** Fecha de ayer en horario de EE. UU. (la "jornada" NBA que acaba de terminar) */
-export function previousNbaDate(now = new Date()) {
-  const us = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  us.setDate(us.getDate() - 1);
-  return us.toLocaleDateString("en-CA"); // YYYY-MM-DD
-}
+export { previousNbaDate } from "./dates";

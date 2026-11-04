@@ -1,6 +1,8 @@
 import { and, desc, eq, ilike, inArray, max } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb, schema } from "../db";
+import { espnNbaProvider } from "./providers/espn-nba";
+import type { ScheduledGame } from "./providers/types";
 import { averages, type NbaAverages, type NbaStats } from "./sports/nba";
 
 const { teams, players, games, playerGameStats } = schema;
@@ -14,10 +16,12 @@ export interface PlayerListItem {
   headshot: string | null;
   team: string | null;
   teamLogo: string | null;
+  teamExternalId: string | null;
 }
 
 export interface GameLine {
   gameId: number;
+  gameExternalId: string;
   date: string;
   teamAbbr: string;
   opponentAbbr: string;
@@ -39,6 +43,7 @@ const playerFields = {
   headshot: players.headshot,
   team: teams.abbreviation,
   teamLogo: teams.logo,
+  teamExternalId: teams.externalId,
 };
 
 export async function searchPlayers(q: string): Promise<PlayerListItem[]> {
@@ -56,16 +61,18 @@ async function currentSeason() {
   return row?.season ?? null;
 }
 
-/** Partidos de la temporada actual para varios jugadores, del más reciente al más antiguo */
-async function gameLines(playerIds: number[]) {
-  const season = await currentSeason();
-  if (!season || playerIds.length === 0) return [];
+/** Partidos de varios jugadores (de la temporada actual o de un día), del más reciente al más antiguo */
+async function gameLines(playerIds: number[], date?: string) {
+  if (playerIds.length === 0) return [];
+  const season = date ? null : await currentSeason();
+  if (!date && !season) return [];
   const rows = await getDb()
     .select({
       playerId: playerGameStats.playerId,
       teamId: playerGameStats.teamId,
       stats: playerGameStats.stats,
       gameId: games.id,
+      gameExternalId: games.externalId,
       date: games.date,
       homeTeamId: games.homeTeamId,
       homeScore: games.homeScore,
@@ -77,13 +84,14 @@ async function gameLines(playerIds: number[]) {
     .innerJoin(games, eq(playerGameStats.gameId, games.id))
     .innerJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
     .innerJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-    .where(and(inArray(playerGameStats.playerId, playerIds), eq(games.season, season)))
+    .where(and(inArray(playerGameStats.playerId, playerIds), date ? eq(games.date, date) : eq(games.season, season!)))
     .orderBy(desc(games.date));
 
   return rows.map((r) => {
     const isHome = r.teamId === r.homeTeamId;
     const line: GameLine = {
       gameId: r.gameId,
+      gameExternalId: r.gameExternalId,
       date: r.date,
       isHome,
       teamAbbr: isHome ? r.homeAbbr : r.awayAbbr,
@@ -113,4 +121,52 @@ export async function playerDetail(id: number) {
   if (!summary) return null;
   const log = (await gameLines([id])).map((l) => l.line);
   return { ...summary, log };
+}
+
+export type DayGame =
+  | { kind: "played"; line: GameLine }
+  | {
+      kind: "scheduled" | "live" | "final";
+      startTime: string;
+      statusDetail: string;
+      opponentAbbr: string;
+      isHome: boolean;
+      teamScore: number | null;
+      opponentScore: number | null;
+    }
+  | { kind: "none" };
+
+export interface DayEntry extends PlayerSummary {
+  day: DayGame;
+}
+
+/** Qué hace cada jugador en una jornada: sus stats si jugó, o el partido programado / en juego */
+export async function playerDay(ids: number[], date: string): Promise<DayEntry[]> {
+  const [summaries, lines, schedule] = await Promise.all([
+    playerSummaries(ids),
+    gameLines(ids, date),
+    espnNbaProvider.getSchedule(date).catch((): ScheduledGame[] => []),
+  ]);
+
+  return summaries.map((p): DayEntry => {
+    const line = lines.find((l) => l.playerId === p.id)?.line;
+    if (line) return { ...p, day: { kind: "played", line } };
+
+    const game = schedule.find((g) => g.home.externalId === p.teamExternalId || g.away.externalId === p.teamExternalId);
+    if (!game) return { ...p, day: { kind: "none" } };
+    const isHome = game.home.externalId === p.teamExternalId;
+    const [own, opp] = isHome ? [game.home, game.away] : [game.away, game.home];
+    return {
+      ...p,
+      day: {
+        kind: game.status,
+        startTime: game.startTime,
+        statusDetail: game.statusDetail,
+        opponentAbbr: opp.abbreviation,
+        isHome,
+        teamScore: own.score,
+        opponentScore: opp.score,
+      },
+    };
+  });
 }

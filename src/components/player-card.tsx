@@ -1,10 +1,9 @@
 import Link from "next/link";
-import type { PlayerSummary } from "@/lib/queries";
+import { formatTipoff } from "@/lib/dates";
+import type { DayEntry, DayGame, GameLine } from "@/lib/queries";
+import type { NbaAverages } from "@/lib/sports/nba";
 import { FollowButton } from "./follow-button";
 import { PlayerAvatar } from "./player-avatar";
-
-const fmtDate = (d: string) =>
-  new Date(d + "T12:00:00Z").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
 
 function Stat({ label, value, avg }: { label: string; value: number; avg?: number }) {
   const diff = avg === undefined ? 0 : value - avg;
@@ -22,13 +21,97 @@ function Stat({ label, value, avg }: { label: string; value: number; avg?: numbe
   );
 }
 
-export function PlayerCard({ p }: { p: PlayerSummary }) {
-  const g = p.last;
-  const won = g && g.teamScore !== null && g.opponentScore !== null && g.teamScore > g.opponentScore;
+function Matchup({ isHome, opponent, children }: { isHome: boolean; opponent: string; children?: React.ReactNode }) {
+  return (
+    <div className="mt-4 flex items-center justify-between text-sm text-zinc-400">
+      <span>
+        {isHome ? "vs" : "@"} <span className="font-medium text-zinc-200">{opponent}</span>
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function Result({ team, opp }: { team: number | null; opp: number | null }) {
+  const won = (team ?? 0) > (opp ?? 0);
+  return (
+    <span className={won ? "text-emerald-400" : "text-rose-400"}>
+      {won ? "V" : "D"} {team}-{opp}
+    </span>
+  );
+}
+
+function Played({ g, season }: { g: GameLine; season: NbaAverages | null }) {
+  return (
+    <>
+      <Matchup isHome={g.isHome} opponent={g.opponentAbbr}>
+        <Result team={g.teamScore} opp={g.opponentScore} />
+      </Matchup>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <Stat label="Pts" value={g.stats.pts} avg={season?.pts} />
+        <Stat label="Reb" value={g.stats.reb} avg={season?.reb} />
+        <Stat label="Ast" value={g.stats.ast} avg={season?.ast} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400 tabular-nums">
+        <span>{g.stats.min} MIN</span>
+        <span>TC {g.stats.fgm}/{g.stats.fga}</span>
+        <span>3P {g.stats.fg3m}/{g.stats.fg3a}</span>
+        <span>TL {g.stats.ftm}/{g.stats.fta}</span>
+        <span>{g.stats.stl} ROB</span>
+        <span>{g.stats.blk} TAP</span>
+        <span>{g.stats.plusMinus > 0 ? "+" : ""}{g.stats.plusMinus}</span>
+      </div>
+    </>
+  );
+}
+
+function DayBody({ day, season }: { day: DayGame; season: NbaAverages | null }) {
+  switch (day.kind) {
+    case "played":
+      return <Played g={day.line} season={season} />;
+    case "scheduled":
+      return (
+        <Matchup isHome={day.isHome} opponent={day.opponentAbbr}>
+          <span className="rounded-full bg-sky-400/10 px-2.5 py-0.5 text-sky-300">
+            {formatTipoff(day.startTime)}
+          </span>
+        </Matchup>
+      );
+    case "live":
+      return (
+        <Matchup isHome={day.isHome} opponent={day.opponentAbbr}>
+          <span className="flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+            <span className="tabular-nums text-zinc-200">
+              {day.teamScore}-{day.opponentScore}
+            </span>
+            <span className="text-xs">{day.statusDetail}</span>
+          </span>
+        </Matchup>
+      );
+    case "final":
+      // Acabado pero aún sin cargar en la base de datos (o el jugador no salió a pista)
+      return (
+        <>
+          <Matchup isHome={day.isHome} opponent={day.opponentAbbr}>
+            <Result team={day.teamScore} opp={day.opponentScore} />
+          </Matchup>
+          <p className="mt-3 text-sm text-zinc-500">No jugó o sus estadísticas aún no están cargadas.</p>
+        </>
+      );
+    case "none":
+      return <p className="mt-4 text-sm text-zinc-500">Sin partido este día.</p>;
+  }
+}
+
+export function PlayerCard({ p }: { p: DayEntry }) {
+  const resting = p.day.kind === "none";
   return (
     <Link
       href={`/jugadores/${p.id}`}
-      className="group block rounded-2xl border border-white/10 bg-zinc-900/60 p-4 transition hover:border-white/20 hover:bg-zinc-900"
+      className={`group block rounded-2xl border border-white/10 bg-zinc-900/60 p-4 transition hover:border-white/20 hover:bg-zinc-900 ${
+        resting ? "opacity-60 hover:opacity-100" : ""
+      }`}
     >
       <div className="flex items-center gap-3">
         <PlayerAvatar src={p.headshot} name={p.name} />
@@ -40,45 +123,7 @@ export function PlayerCard({ p }: { p: PlayerSummary }) {
         </div>
         <FollowButton playerId={p.id} />
       </div>
-
-      {g ? (
-        <>
-          <div className="mt-4 flex items-center justify-between text-sm text-zinc-400">
-            <span className="capitalize">{fmtDate(g.date)}</span>
-            <span>
-              {g.isHome ? "vs" : "@"} {g.opponentAbbr}{" "}
-              <span className={won ? "text-emerald-400" : "text-rose-400"}>
-                {won ? "V" : "D"} {g.teamScore}-{g.opponentScore}
-              </span>
-            </span>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <Stat label="Pts" value={g.stats.pts} avg={p.season?.pts} />
-            <Stat label="Reb" value={g.stats.reb} avg={p.season?.reb} />
-            <Stat label="Ast" value={g.stats.ast} avg={p.season?.ast} />
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400 tabular-nums">
-            <span>{g.stats.min} MIN</span>
-            <span>
-              TC {g.stats.fgm}/{g.stats.fga}
-            </span>
-            <span>
-              3P {g.stats.fg3m}/{g.stats.fg3a}
-            </span>
-            <span>
-              TL {g.stats.ftm}/{g.stats.fta}
-            </span>
-            <span>{g.stats.stl} ROB</span>
-            <span>{g.stats.blk} TAP</span>
-            <span>
-              {g.stats.plusMinus > 0 ? "+" : ""}
-              {g.stats.plusMinus}
-            </span>
-          </div>
-        </>
-      ) : (
-        <p className="mt-4 text-sm text-zinc-500">Sin partidos esta temporada todavía.</p>
-      )}
+      <DayBody day={p.day} season={p.season} />
     </Link>
   );
 }
