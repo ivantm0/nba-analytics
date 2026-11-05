@@ -1,4 +1,4 @@
-# NBA Analitics
+# NBA Analytics
 
 Web para seguir las estadísticas de tus jugadores favoritos tras cada jornada, sin tener que entrar partido a partido.
 

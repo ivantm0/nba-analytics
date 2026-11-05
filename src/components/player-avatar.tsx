@@ -7,9 +7,17 @@ export function PlayerAvatar({ src, name, size = 56 }: { src: string | null; nam
       style={{ width: size, height: size }}
     >
       {src ? (
-        <img src={src} alt={name} className="h-full w-full object-cover object-top" loading="lazy" />
+        <img
+          src={src}
+          alt=""
+          width={size}
+          height={size}
+          className="h-full w-full object-cover object-top"
+          loading="lazy"
+          decoding="async"
+        />
       ) : (
-        <span className="flex h-full w-full items-center justify-center text-sm text-zinc-400">
+        <span aria-hidden className="flex h-full w-full items-center justify-center text-sm font-medium text-zinc-400">
           {name.split(" ").map((p) => p[0]).join("").slice(0, 2)}
         </span>
       )}

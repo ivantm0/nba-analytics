@@ -35,6 +35,15 @@ export function formatDay(date: string) {
   );
 }
 
+/** Versión compacta para móvil, ej. "Lun, 2 nov" */
+export function formatDayShort(date: string) {
+  return capitalize(
+    new Date(date + "T12:00:00Z")
+      .toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
+      .replace(/\.$/, ""),
+  );
+}
+
 export function relativeDay(date: string) {
   const diff = Math.round((Date.parse(date) - Date.parse(nbaToday())) / 86_400_000);
   return ({ [-1]: "Ayer", 0: "Hoy", 1: "Mañana" } as Record<number, string>)[diff] ?? null;

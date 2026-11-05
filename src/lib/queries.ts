@@ -1,9 +1,9 @@
-import { and, desc, eq, ilike, inArray, max } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, max, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb, schema } from "../db";
 import { espnNbaProvider } from "./providers/espn-nba";
 import type { ScheduledGame } from "./providers/types";
-import { averages, type NbaAverages, type NbaStats } from "./sports/nba";
+import { averages, badges, type Badge, type NbaAverages, type NbaStats } from "./sports/nba";
 
 const { teams, players, games, playerGameStats } = schema;
 const homeTeam = alias(teams, "home_team");
@@ -52,7 +52,11 @@ export async function searchPlayers(q: string): Promise<PlayerListItem[]> {
     .from(players)
     .leftJoin(teams, eq(players.teamId, teams.id))
     .where(and(eq(players.sport, "nba"), ilike(players.name, `%${q}%`)))
-    .orderBy(players.name)
+    // Primero los que empiezan por el texto (nombre o apellido), luego el resto
+    .orderBy(
+      sql`case when ${players.name} ilike ${q + "%"} or ${players.name} ilike ${"% " + q + "%"} then 0 else 1 end`,
+      players.name,
+    )
     .limit(25);
 }
 
@@ -104,27 +108,45 @@ async function gameLines(playerIds: number[], date?: string) {
   });
 }
 
-export async function playerSummaries(ids: number[]): Promise<PlayerSummary[]> {
+/** Resumen de cada jugador más todos sus partidos de la temporada (del más reciente al más antiguo) */
+async function loadPlayers(ids: number[]) {
   if (ids.length === 0) return [];
   const [list, lines] = await Promise.all([
     getDb().select(playerFields).from(players).leftJoin(teams, eq(players.teamId, teams.id)).where(inArray(players.id, ids)),
     gameLines(ids),
   ]);
   return list.map((p) => {
-    const own = lines.filter((l) => l.playerId === p.id).map((l) => l.line);
-    return { ...p, last: own[0] ?? null, season: averages(own.map((l) => l.stats)) };
+    const log = lines.filter((l) => l.playerId === p.id).map((l) => l.line);
+    const summary: PlayerSummary = { ...p, last: log[0] ?? null, season: averages(log.map((l) => l.stats)) };
+    return { summary, log };
   });
 }
 
+export async function playerSummaries(ids: number[]): Promise<PlayerSummary[]> {
+  return (await loadPlayers(ids)).map((p) => p.summary);
+}
+
 export async function playerDetail(id: number) {
-  const [summary] = await playerSummaries([id]);
-  if (!summary) return null;
-  const log = (await gameLines([id])).map((l) => l.line);
-  return { ...summary, log };
+  const [p] = await loadPlayers([id]);
+  if (!p) return null;
+  return { ...p.summary, log: p.log.map((g) => ({ ...g, badges: gameBadges(g, p.log) })) };
+}
+
+/** Badges de un partido, comparándolo solo con los partidos jugados hasta ese día */
+function gameBadges(g: GameLine, log: GameLine[]): Badge[] {
+  return badges(g.stats, log.filter((l) => l.date < g.date).map((l) => l.stats));
+}
+
+export interface RecentGame {
+  date: string;
+  opponentAbbr: string;
+  pts: number;
+  reb: number;
+  ast: number;
 }
 
 export type DayGame =
-  | { kind: "played"; line: GameLine }
+  | { kind: "played"; line: GameLine; badges: Badge[] }
   | {
       kind: "scheduled" | "live" | "final";
       startTime: string;
@@ -138,26 +160,35 @@ export type DayGame =
 
 export interface DayEntry extends PlayerSummary {
   day: DayGame;
+  /** Últimos 5 partidos hasta ese día (incluido), del más antiguo al más reciente */
+  recent: RecentGame[];
 }
 
 /** Qué hace cada jugador en una jornada: sus stats si jugó, o el partido programado / en juego */
 export async function playerDay(ids: number[], date: string): Promise<DayEntry[]> {
-  const [summaries, lines, schedule] = await Promise.all([
-    playerSummaries(ids),
+  const [loaded, lines, schedule] = await Promise.all([
+    loadPlayers(ids),
     gameLines(ids, date),
     espnNbaProvider.getSchedule(date).catch((): ScheduledGame[] => []),
   ]);
 
-  return summaries.map((p): DayEntry => {
+  return loaded.map(({ summary: p, log }): DayEntry => {
+    const recent = log
+      .filter((g) => g.date <= date)
+      .slice(0, 5)
+      .reverse()
+      .map((g) => ({ date: g.date, opponentAbbr: g.opponentAbbr, pts: g.stats.pts, reb: g.stats.reb, ast: g.stats.ast }));
+
     const line = lines.find((l) => l.playerId === p.id)?.line;
-    if (line) return { ...p, day: { kind: "played", line } };
+    if (line) return { ...p, recent, day: { kind: "played", line, badges: gameBadges(line, log) } };
 
     const game = schedule.find((g) => g.home.externalId === p.teamExternalId || g.away.externalId === p.teamExternalId);
-    if (!game) return { ...p, day: { kind: "none" } };
+    if (!game) return { ...p, recent, day: { kind: "none" } };
     const isHome = game.home.externalId === p.teamExternalId;
     const [own, opp] = isHome ? [game.home, game.away] : [game.away, game.home];
     return {
       ...p,
+      recent,
       day: {
         kind: game.status,
         startTime: game.startTime,

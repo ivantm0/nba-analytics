@@ -14,6 +14,7 @@
   "dependencies": {
     "@netlify/functions": "^6.0.3",
     "drizzle-orm": "^0.45.4",
+    "lucide-react": "^1.69.0",
     "next": "15.5.28",
     "postgres": "^4.0.0",
     "react": "19.1.0",

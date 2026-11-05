@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { FollowButton } from "@/components/follow-button";
+import { GameBadges } from "@/components/game-badges";
 import { PlayerAvatar } from "@/components/player-avatar";
+import { TrendChart } from "@/components/trend-chart";
 import { playerDetail } from "@/lib/queries";
 
 export const revalidate = 3600;
@@ -29,10 +31,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
   return (
     <>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <PlayerAvatar src={p.headshot} name={p.name} size={88} />
         <div className="flex-1">
-          <h1 className="text-3xl font-bold tracking-tight">{p.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-balance sm:text-3xl">{p.name}</h1>
           <p className="text-zinc-400">
             {p.team ?? "—"} · {p.position ?? "—"}
           </p>
@@ -54,13 +56,15 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         </section>
       )}
 
+      <TrendChart log={p.log} />
+
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-400">Partidos</h2>
         <div className="overflow-x-auto rounded-xl border border-white/10">
-          <table className="w-full text-sm tabular-nums">
-            <thead className="bg-zinc-900 text-left text-xs uppercase text-zinc-500">
+          <table className="w-full text-sm whitespace-nowrap tabular-nums">
+            <thead className="bg-zinc-900 text-left text-xs uppercase tracking-wide text-zinc-500">
               <tr>
-                {["Fecha", "Rival", "Res.", "MIN", "PTS", "REB", "AST", "ROB", "TAP", "PER", "TC", "3P", "TL", "+/-"].map((h) => (
+                {["Fecha", "Rival", "Res.", "MIN", "PTS", "REB", "AST", "ROB", "TAP", "PER", "TC", "3P", "TL", "+/-", "Hitos"].map((h) => (
                   <th key={h} className="px-3 py-2 font-medium">
                     {h}
                   </th>
@@ -71,7 +75,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
               {p.log.map((g) => {
                 const won = (g.teamScore ?? 0) > (g.opponentScore ?? 0);
                 return (
-                  <tr key={g.gameId} className="hover:bg-white/[0.02]">
+                  <tr key={g.gameId} className="transition-colors hover:bg-white/[0.03]">
                     <td className="px-3 py-2 text-zinc-400">{g.date.slice(5).split("-").reverse().join("/")}</td>
                     <td className="px-3 py-2">
                       {g.isHome ? "vs" : "@"} {g.opponentAbbr}
@@ -90,12 +94,15 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
                     <td className="px-3 py-2">{g.stats.fg3m}/{g.stats.fg3a}</td>
                     <td className="px-3 py-2">{g.stats.ftm}/{g.stats.fta}</td>
                     <td className="px-3 py-2">{g.stats.plusMinus > 0 ? "+" : ""}{g.stats.plusMinus}</td>
+                    <td className="px-3 py-1.5">
+                      <GameBadges badges={g.badges} className="flex-nowrap" />
+                    </td>
                   </tr>
                 );
               })}
               {p.log.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="px-3 py-6 text-center text-zinc-500">
+                  <td colSpan={15} className="px-3 py-6 text-center text-zinc-500">
                     Sin partidos esta temporada.
                   </td>
                 </tr>

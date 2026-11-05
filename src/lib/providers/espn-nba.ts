@@ -6,7 +6,12 @@ const BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba";
 /* eslint-disable @typescript-eslint/no-explicit-any -- respuestas JSON no tipadas de ESPN */
 
 async function getJson(url: string): Promise<any> {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  // Con límite de tiempo: si ESPN no responde, la web no se queda colgada esperando
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error(`ESPN ${res.status} en ${url}`);
   return res.json();
 }
