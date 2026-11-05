@@ -3,6 +3,7 @@ import { FollowButton } from "@/components/follow-button";
 import { GameBadges } from "@/components/game-badges";
 import { PlayerAvatar } from "@/components/player-avatar";
 import { TrendChart } from "@/components/trend-chart";
+import { withDb } from "@/db";
 import { playerDetail } from "@/lib/queries";
 
 export const revalidate = 3600;
@@ -11,7 +12,7 @@ const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const p = await playerDetail(Number(id));
+  const p = await withDb(() => playerDetail(Number(id)));
   if (!p) notFound();
   const s = p.season;
 
